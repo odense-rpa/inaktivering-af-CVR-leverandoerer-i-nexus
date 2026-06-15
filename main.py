@@ -17,14 +17,17 @@ tracker: Tracker | None = None
 proces_navn = "Inaktivering af CVR leverandører i Nexus"
 
 
-def beregn_levenshtein(addresse1: str, addresse2: str) -> float:
-    """Beregn normaliseret Levenshtein-afstand (0=identisk, 1=helt forskellig)."""
-    if not addresse1 or not addresse2:
-        raise ValueError("Begge adresser skal være ikke-tomme strenge.")
+def beregn_levenshtein(nexus_navn: str, cvr_navn: str) -> float:
+    """Beregn Levenshtein-afstand som procentdel af Nexus-navnets længde.
     
-    distance = Levenshtein.distance(addresse1.lower(), addresse2.lower())
-    max_length = max(len(addresse1), len(addresse2))
-    return distance / max_length if max_length > 0 else 0.0
+    Matcher Blue Prism-logikken: (distance / Len(nexus_navn)) * 100.
+    Returnerer en procentværdi, f.eks. 9.5 for 9.5%.
+    """
+    if not nexus_navn or not cvr_navn:
+        raise ValueError("Begge navne skal være ikke-tomme strenge.")
+
+    distance = Levenshtein.distance(nexus_navn.lower(), cvr_navn.lower())
+    return (distance / len(nexus_navn)) * 100
 
 
 async def populate_queue(workqueue: Workqueue):
@@ -33,7 +36,7 @@ async def populate_queue(workqueue: Workqueue):
     logger.info("Hello from populate workqueue!")
 
     alle_leverandører = nexus.nexus_client.get("https://odensekommune.nexus.kmd.dk/api/core/mobile/odensekommune/v2/suppliers").json()
-    # keep alle where cvrNumber != "" AND active == true
+    # behold alle hvor cvrNumber != "" AND active == true
     aktive_leverandører = [leverandør for leverandør in alle_leverandører if leverandør.get("cvrNumber") and leverandør.get("active")]
     for leverandør in aktive_leverandører:
         self = nexus.nexus_client.get(leverandør["_links"]["self"]["href"]).json()
@@ -42,7 +45,7 @@ async def populate_queue(workqueue: Workqueue):
             "id" : leverandør["id"],
             "CVR": leverandør["cvrNumber"],
             "navn": leverandør["name"],
-            "P-nummer": self.get("pNumber"),
+            "P-nummer": self.get("productNumber"), 
         }
         workqueue.add_item(data=data, reference=data["CVR"])
         
@@ -56,55 +59,102 @@ async def process_workqueue(workqueue: Workqueue):
     for item in workqueue:
         with item:
             data = item.data  # Item data deserialized from json as dict
-            skal_opdateres = False
- 
+            
             try:
-                if data["P-nummer"] is None:
+                # --- Step 1: Check if P-number exists ---
+                if not data.get("P-nummer"):
                     report(
-                        report_id="inaktivering_af_cvr_leverandører_i_nexus", # findes ikke atm
+                        report_id="inaktivering_af_cvr_leverandoerer_i_nexus",
                         group="Manuel",
                         json={
                             "CVR": data["CVR"],
-                            "Årsag": "Ingen P-nummer tilknyttet leverandør"
+                            "Årsag": "Intet p-nummer i Nexus"
                         }
                     )
+                    tracker.track_partial_task(process_name=proces_navn)
+                    continue
                 
-                # CVR-oplysninger:
+                p_number = data["P-nummer"]
+
+                # --- Step 2: Fetch CVR data ---
                 cvr_info = datafordeler.hent_CVR_oplysninger(data["CVR"])
-                if cvr_info["virksomhedsnavn"]["vaerdi"] is None:
+                
+                if not cvr_info or not cvr_info.get("virksomhedsnavn") or not cvr_info["virksomhedsnavn"].get("vaerdi"):
                     report(
-                        report_id="inaktivering_af_cvr_leverandører_i_nexus", # findes ikke atm
+                        report_id="inaktivering_af_cvr_leverandoerer_i_nexus",
                         group="Manuel",
                         json={
                             "CVR": data["CVR"],
-                            "Årsag": f"Virksomhed findes ikke: {data['CVR']}"
+                            "Årsag": f"Virksomhed ikke fundet i CVR: {data['CVR']}"
                         }
                     )
-                # Beregn Levenshtein-afstand mellem navnet i Nexus og navnet i CVR-oplysningerne
-                levenshtein_score = beregn_levenshtein(data["navn"], cvr_info["virksomhedsnavn"]["vaerdi"])
-                if levenshtein_score < 0.1:
-                    p_enheder = cvr_info.get("produktionsenheder", [])
-                    # finder den P-nummer i CVR-oplysningerne, der matcher det P-nummer, der er knyttet til leverandøren i Nexus
-                    p_enhed = next((enhed for enhed in p_enheder if enhed.get("pNummer") == data["P-nummer"]), None)
-                    if not p_enhed: # Hvis der ikke findes en matchende P-enhed i CVR-oplysningerne, rapporter da til manuel behandling
+                    tracker.track_partial_task(process_name=proces_navn)
+                    continue
+
+                cvr_company_name = cvr_info["virksomhedsnavn"]["vaerdi"]
+                produktionsenheder = cvr_info.get("produktionsenheder", [])
+
+                # --- Step 3: First Levenshtein check (Nexus Name vs CVR Main Name) ---
+                cvr_name_score = beregn_levenshtein(data["navn"], cvr_company_name)
+                if cvr_name_score < 10:
+                    # CVR name matches — no further name checks needed
+                    pass
+                else:
+                    # CVR name mismatch — try P-unit name as fallback
+
+                    # --- Step 4: Find matching P-unit ---
+                    p_enhed = next(
+                        (enhed for enhed in produktionsenheder if enhed.get("pNummer") == int(p_number)),
+                        None
+                    )
+
+                    if not p_enhed:
                         report(
-                            report_id="inaktivering_af_cvr_leverandører_i_nexus", # findes ikke atm
+                            report_id="inaktivering_af_cvr_leverandoerer_i_nexus",
                             group="Manuel",
                             json={
                                 "CVR": data["CVR"],
-                                "Årsag": f"Angivne P-nummer kunne ikke bekræftes: {data['P-nummer']}"
+                                "P-nummer": p_number,
+                                "Årsag": f"Angivne P-nummer kunne ikke bekræftes: {p_number}"
                             }
                         )
+                        tracker.track_partial_task(process_name=proces_navn)
+                        continue
+
+                    # --- Step 5: Second Levenshtein check (Nexus Name vs P-Unit Name) ---
+                    p_unit_name = p_enhed.get("produktionsenhedsnavn", {}).get("vaerdi")
+                    if p_unit_name:
+                        p_name_score = beregn_levenshtein(data["navn"], p_unit_name)
+                        if p_name_score >= 10:
+                            report(
+                                report_id="inaktivering_af_cvr_leverandoerer_i_nexus",
+                                group="Manuel",
+                                json={
+                                    "CVR": data["CVR"],
+                                    "P-nummer": p_number,
+                                    "Årsag": f"Leverandørnavn i Nexus og navn fra datafordeleren stemmer ikke overens: {data['navn']} vs {p_unit_name}"
+                                }
+                            )
+                            tracker.track_partial_task(process_name=proces_navn)
+                            continue
                     else:
+                        logger.warning(f"P-unit name missing for P-number {p_number}, skipping name check")
 
-                
+                # --- Step 6: All checks passed - Proceed with inactivation ---
+                logger.info(f"Valideret: {data['navn']} (CVR: {data['CVR']})")
 
-                # Process the item here
-                pass
-            except WorkItemError as e:
-                # A WorkItemError represents a soft error that indicates the item should be passed to manual processing or a business logic fault
+                # TODO: Add your actual inactivation logic here
+                if cvr_info["virksomhed"]["status"] != "aktiv":
+                    leverandør = nexus.nexus_client.get(f"https://odensekommune.nexus.kmd.dk:443/api/core/mobile/odensekommune/v2/suppliers/{data['id']}").json()
+                    leverandør = nexus.nexus_client.get(leverandør["_links"]["self"]["href"]).json()
+                    leverandør["active"] = False
+                    nexus.organisationer.opdater_leverandør(leverandør)
+                    tracker.track_task(process_name=proces_navn)
+
+            except Exception as e:
                 logger.error(f"Error processing item: {data}. Error: {e}")
                 item.fail(str(e))
+                tracker.track_partial_task(process_name=proces_navn)
 
 
 async def main():
