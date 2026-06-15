@@ -143,7 +143,7 @@ async def process_workqueue(workqueue: Workqueue):
                 # --- Step 6: All checks passed - Proceed with inactivation ---
                 logger.info(f"Valideret: {data['navn']} (CVR: {data['CVR']})")
 
-                # TODO: Add your actual inactivation logic here
+                # Hvis virksomheden ikke er aktiv i CVR, så inaktiver i Nexus
                 if cvr_info["virksomhed"]["status"] != "aktiv":
                     leverandør = nexus.nexus_client.get(f"https://odensekommune.nexus.kmd.dk:443/api/core/mobile/odensekommune/v2/suppliers/{data['id']}").json()
                     leverandør = nexus.nexus_client.get(leverandør["_links"]["self"]["href"]).json()
