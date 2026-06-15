@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 nexus: NexusClientManager | None = None
 datafordeler: DatafordelerClient | None = None
 tracker: Tracker | None = None
-proces_navn = "Inaktivering af CVR leverandører i Nexus"
+proces_navn = "Inaktivering af CVR-leverandører i Nexus"
 
 
 def beregn_levenshtein(nexus_navn: str, cvr_navn: str) -> float:
@@ -49,7 +49,6 @@ async def populate_queue(workqueue: Workqueue):
         }
         workqueue.add_item(data=data, reference=data["CVR"])
         
-    print("hej")
 
 async def process_workqueue(workqueue: Workqueue):
     logger = logging.getLogger(__name__)
