@@ -95,7 +95,7 @@ async def process_workqueue(workqueue: Workqueue):
 
                 # --- Step 3: First Levenshtein check (Nexus Name vs CVR Main Name) ---
                 cvr_name_score = beregn_levenshtein(data["navn"], cvr_company_name)
-                if cvr_name_score < 10:
+                if cvr_name_score < 15:
                     # CVR name matches — no further name checks needed
                     pass
                 else:
@@ -124,7 +124,7 @@ async def process_workqueue(workqueue: Workqueue):
                     p_unit_name = p_enhed.get("produktionsenhedsnavn", {}).get("vaerdi")
                     if p_unit_name:
                         p_name_score = beregn_levenshtein(data["navn"], p_unit_name)
-                        if p_name_score >= 10:
+                        if p_name_score >= 15:
                             report(
                                 report_id="inaktivering_af_cvr_leverandoerer_i_nexus",
                                 group="Manuel",
