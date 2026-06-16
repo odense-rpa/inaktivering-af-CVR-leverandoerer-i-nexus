@@ -362,6 +362,7 @@ dependencies = [
     { name = "kmd-nexus-client" },
     { name = "odk-tools" },
     { name = "rapidfuzz" },
+    { name = "ruff" },
 ]
 
 [package.metadata]
@@ -371,6 +372,7 @@ requires-dist = [
     { name = "kmd-nexus-client", git = "https://github.com/odense-rpa/nexus-client.git" },
     { name = "odk-tools", git = "https://github.com/odense-rpa/odk-tools.git" },
     { name = "rapidfuzz", specifier = ">=3.9.0" },
+    { name = "ruff", specifier = ">=0.15.16" },
 ]
 
 [[package]]

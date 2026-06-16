@@ -1,9 +1,13 @@
 import asyncio
 import logging
-import sys
 import os
 
-from automation_server_client import AutomationServer, Workqueue, WorkItemError, Credential, WorkItemStatus
+from automation_server_client import (
+    AutomationServer,
+    Workqueue,
+    Credential,
+    WorkItemStatus,
+)
 from kmd_nexus_client import NexusClientManager
 from datafordeler import Datafordeler as DatafordelerClient
 from odk_tools.tracking import Tracker
@@ -19,7 +23,7 @@ proces_navn = "Inaktivering af CVR-leverandører i Nexus"
 
 def beregn_levenshtein(nexus_navn: str, cvr_navn: str) -> float:
     """Beregn Levenshtein-afstand som procentdel af Nexus-navnets længde.
-    
+
     Matcher Blue Prism-logikken: (distance / Len(nexus_navn)) * 100.
     Returnerer en procentværdi, f.eks. 9.5 for 9.5%.
     """
@@ -35,20 +39,26 @@ async def populate_queue(workqueue: Workqueue):
 
     logger.info("Hello from populate workqueue!")
 
-    alle_leverandører = nexus.nexus_client.get("https://odensekommune.nexus.kmd.dk/api/core/mobile/odensekommune/v2/suppliers").json()
+    alle_leverandører = nexus.nexus_client.get(
+        "https://odensekommune.nexus.kmd.dk/api/core/mobile/odensekommune/v2/suppliers"
+    ).json()
     # behold alle hvor cvrNumber != "" AND active == true
-    aktive_leverandører = [leverandør for leverandør in alle_leverandører if leverandør.get("cvrNumber") and leverandør.get("active")]
+    aktive_leverandører = [
+        leverandør
+        for leverandør in alle_leverandører
+        if leverandør.get("cvrNumber") and leverandør.get("active")
+    ]
     for leverandør in aktive_leverandører:
         self = nexus.nexus_client.get(leverandør["_links"]["self"]["href"]).json()
 
         data = {
-            "id" : leverandør["id"],
+            "id": leverandør["id"],
             "CVR": leverandør["cvrNumber"],
             "navn": leverandør["name"],
-            "P-nummer": self.get("productNumber"), 
+            "P-nummer": self.get("productNumber"),
         }
         workqueue.add_item(data=data, reference=data["CVR"])
-        
+
 
 async def process_workqueue(workqueue: Workqueue):
     logger = logging.getLogger(__name__)
@@ -58,34 +68,35 @@ async def process_workqueue(workqueue: Workqueue):
     for item in workqueue:
         with item:
             data = item.data  # Item data deserialized from json as dict
-            
+
             try:
                 # --- Step 1: Check if P-number exists ---
                 if not data.get("P-nummer"):
                     report(
                         report_id="inaktivering_af_cvr_leverandoerer_i_nexus",
                         group="Manuel",
-                        json={
-                            "CVR": data["CVR"],
-                            "Årsag": "Intet p-nummer i Nexus"
-                        }
+                        json={"CVR": data["CVR"], "Årsag": "Intet p-nummer i Nexus"},
                     )
                     tracker.track_partial_task(process_name=proces_navn)
                     continue
-                
+
                 p_number = data["P-nummer"]
 
                 # --- Step 2: Fetch CVR data ---
                 cvr_info = datafordeler.hent_CVR_oplysninger(data["CVR"])
-                
-                if not cvr_info or not cvr_info.get("virksomhedsnavn") or not cvr_info["virksomhedsnavn"].get("vaerdi"):
+
+                if (
+                    not cvr_info
+                    or not cvr_info.get("virksomhedsnavn")
+                    or not cvr_info["virksomhedsnavn"].get("vaerdi")
+                ):
                     report(
                         report_id="inaktivering_af_cvr_leverandoerer_i_nexus",
                         group="Manuel",
                         json={
                             "CVR": data["CVR"],
-                            "Årsag": f"Virksomhed ikke fundet i CVR: {data['CVR']}"
-                        }
+                            "Årsag": f"Virksomhed ikke fundet i CVR: {data['CVR']}",
+                        },
                     )
                     tracker.track_partial_task(process_name=proces_navn)
                     continue
@@ -103,8 +114,12 @@ async def process_workqueue(workqueue: Workqueue):
 
                     # --- Step 4: Find matching P-unit ---
                     p_enhed = next(
-                        (enhed for enhed in produktionsenheder if enhed.get("pNummer") == int(p_number)),
-                        None
+                        (
+                            enhed
+                            for enhed in produktionsenheder
+                            if enhed.get("pNummer") == int(p_number)
+                        ),
+                        None,
                     )
 
                     if not p_enhed:
@@ -114,8 +129,8 @@ async def process_workqueue(workqueue: Workqueue):
                             json={
                                 "CVR": data["CVR"],
                                 "P-nummer": p_number,
-                                "Årsag": f"Angivne P-nummer kunne ikke bekræftes: {p_number}"
-                            }
+                                "Årsag": f"Angivne P-nummer kunne ikke bekræftes: {p_number}",
+                            },
                         )
                         tracker.track_partial_task(process_name=proces_navn)
                         continue
@@ -131,21 +146,27 @@ async def process_workqueue(workqueue: Workqueue):
                                 json={
                                     "CVR": data["CVR"],
                                     "P-nummer": p_number,
-                                    "Årsag": f"Leverandørnavn i Nexus og navn fra datafordeleren stemmer ikke overens: {data['navn']} vs {p_unit_name}"
-                                }
+                                    "Årsag": f"Leverandørnavn i Nexus og navn fra datafordeleren stemmer ikke overens: {data['navn']} vs {p_unit_name}",
+                                },
                             )
                             tracker.track_partial_task(process_name=proces_navn)
                             continue
                     else:
-                        logger.warning(f"P-unit name missing for P-number {p_number}, skipping name check")
+                        logger.warning(
+                            f"P-unit name missing for P-number {p_number}, skipping name check"
+                        )
 
                 # --- Step 6: All checks passed - Proceed with inactivation ---
                 logger.info(f"Valideret: {data['navn']} (CVR: {data['CVR']})")
 
                 # Hvis virksomheden ikke er aktiv i CVR, så inaktiver i Nexus
                 if cvr_info["virksomhed"]["status"] != "aktiv":
-                    leverandør = nexus.nexus_client.get(f"https://odensekommune.nexus.kmd.dk:443/api/core/mobile/odensekommune/v2/suppliers/{data['id']}").json()
-                    leverandør = nexus.nexus_client.get(leverandør["_links"]["self"]["href"]).json()
+                    leverandør = nexus.nexus_client.get(
+                        f"https://odensekommune.nexus.kmd.dk:443/api/core/mobile/odensekommune/v2/suppliers/{data['id']}"
+                    ).json()
+                    leverandør = nexus.nexus_client.get(
+                        leverandør["_links"]["self"]["href"]
+                    ).json()
                     leverandør["active"] = False
                     nexus.organisationer.opdater_leverandør(leverandør)
                     tracker.track_task(process_name=proces_navn)

@@ -10,6 +10,7 @@ dependencies = [
     "datafordeler",
     "odk-tools",
     "rapidfuzz>=3.9.0",
+    "ruff>=0.15.16",
 ]
 
 [tool.uv.sources]
