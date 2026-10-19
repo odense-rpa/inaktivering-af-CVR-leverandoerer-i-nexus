@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import os
 
 from automation_server_client import (
     AutomationServer,
@@ -9,14 +8,14 @@ from automation_server_client import (
     WorkItemStatus,
 )
 from kmd_nexus_client import NexusClientManager
-from datafordeler import Datafordeler as DatafordelerClient
+from datafordeler import DatafordelerGraphQL
 from odk_tools.tracking import Tracker
 from rapidfuzz.distance import Levenshtein
 from odk_tools.reporting import report
 
 logger = logging.getLogger(__name__)
 nexus: NexusClientManager | None = None
-datafordeler: DatafordelerClient | None = None
+datafordeler: DatafordelerGraphQL | None = None
 tracker: Tracker | None = None
 proces_navn = "Inaktivering af CVR-leverandører i Nexus"
 
@@ -83,13 +82,12 @@ async def process_workqueue(workqueue: Workqueue):
                 p_number = data["P-nummer"]
 
                 # --- Step 2: Fetch CVR data ---
-                cvr_info = datafordeler.hent_CVR_oplysninger(data["CVR"])
+                try:
+                    virksomhed = datafordeler.hent_virksomhed(data["CVR"])
+                except ValueError:
+                    virksomhed = None
 
-                if (
-                    not cvr_info
-                    or not cvr_info.get("virksomhedsnavn")
-                    or not cvr_info["virksomhedsnavn"].get("vaerdi")
-                ):
+                if virksomhed is None or not virksomhed.navn:
                     report(
                         report_id="inaktivering_af_cvr_leverandoerer_i_nexus",
                         group="Manuel",
@@ -101,8 +99,7 @@ async def process_workqueue(workqueue: Workqueue):
                     tracker.track_partial_task(process_name=proces_navn)
                     continue
 
-                cvr_company_name = cvr_info["virksomhedsnavn"]["vaerdi"]
-                produktionsenheder = cvr_info.get("produktionsenheder", [])
+                cvr_company_name = virksomhed.navn
 
                 # --- Step 3: First Levenshtein check (Nexus Name vs CVR Main Name) ---
                 cvr_name_score = beregn_levenshtein(data["navn"], cvr_company_name)
@@ -113,14 +110,7 @@ async def process_workqueue(workqueue: Workqueue):
                     # CVR name mismatch — try P-unit name as fallback
 
                     # --- Step 4: Find matching P-unit ---
-                    p_enhed = next(
-                        (
-                            enhed
-                            for enhed in produktionsenheder
-                            if enhed.get("pNummer") == int(p_number)
-                        ),
-                        None,
-                    )
+                    p_enhed = virksomhed.find_produktionsenhed(str(int(p_number)))
 
                     if not p_enhed:
                         report(
@@ -136,7 +126,7 @@ async def process_workqueue(workqueue: Workqueue):
                         continue
 
                     # --- Step 5: Second Levenshtein check (Nexus Name vs P-Unit Name) ---
-                    p_unit_name = p_enhed.get("produktionsenhedsnavn", {}).get("vaerdi")
+                    p_unit_name = p_enhed.navn
                     if p_unit_name:
                         p_name_score = beregn_levenshtein(data["navn"], p_unit_name)
                         if p_name_score >= 15:
@@ -160,7 +150,7 @@ async def process_workqueue(workqueue: Workqueue):
                 logger.info(f"Valideret: {data['navn']} (CVR: {data['CVR']})")
 
                 # Hvis virksomheden ikke er aktiv i CVR, så inaktiver i Nexus
-                if cvr_info["virksomhed"]["status"] != "aktiv":
+                if not virksomhed.er_aktiv:
                     leverandør = nexus.nexus_client.get(
                         f"https://odensekommune.nexus.kmd.dk:443/api/core/mobile/odensekommune/v2/suppliers/{data['id']}"
                     ).json()
@@ -186,6 +176,7 @@ async def main():
     # Initialize external systems for automation here..
     tracking_credential = Credential.get_credential("Odense SQL Server")
     nexus_credential = Credential.get_credential("KMD Nexus - produktion")
+    datafordeler_credential = Credential.get_credential("Datafordeler")
 
     tracker = Tracker(
         username=tracking_credential.username, password=tracking_credential.password
@@ -198,11 +189,9 @@ async def main():
         timeout=60,
     )
 
-    # Initialize Datafordeler with certificates
-    certifikat_sti = os.getenv("CERTIFIKATER", "/certifikater")
-    datafordeler = DatafordelerClient(
-        certifikat_sti=os.path.join(certifikat_sti, "datafordeler.crt"),
-        certifikat_nøglefil=os.path.join(certifikat_sti, "datafordeler.key"),
+    datafordeler = DatafordelerGraphQL(
+        client_id=datafordeler_credential.username,
+        client_secret=datafordeler_credential.password,
     )
 
     # Parse command line arguments

@@ -16,7 +16,7 @@ Automatisering der validerer aktive leverandører i KMD Nexus mod CVR-registret 
 - [`uv`](https://docs.astral.sh/uv/) til pakkehåndtering
 - Adgang til **Automation Server** (arbejdskø)
 - Adgang til **KMD Nexus** (produktion)
-- Adgang til **Datafordeleren** med gyldigt klientcertifikat
+- Adgang til **Datafordeleren** via credential `Datafordeler` i Automation Server
 - En **Odense SQL Server**-konto til tracking
 
 ## Installation
@@ -31,7 +31,6 @@ Kopiér `.env.example` til `.env` og udfyld følgende:
 
 | Variabel | Beskrivelse |
 |---|---|
-| `CERTIFIKATER` | Sti til mappe med `datafordeler.crt` og `datafordeler.key` |
 | *(Automation Server-variabler)* | Ifølge `automation-server-client`-dokumentationen |
 
 ## Kørsel
@@ -65,6 +64,6 @@ uv run python main.py
 CVR-numre og P-numre er erhvervsidentifikatorer og er ikke personoplysninger for juridiske enheder. Robotten behandler ikke CPR-numre eller andre personoplysninger.
 
 - Ingen legitimationsoplysninger må lægges i dette repository
-- `.env` og `certifikater/`-mappen er ekskluderet via `.gitignore` og må aldrig committes
+- `.env` er ekskluderet via `.gitignore` og må aldrig committes
 - Legitimationsoplysninger håndteres udelukkende via miljøvariabler (`.env`) og Automation Server Credentials
 
