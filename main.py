@@ -74,7 +74,11 @@ async def process_workqueue(workqueue: Workqueue):
                     report(
                         report_id="inaktivering_af_cvr_leverandoerer_i_nexus",
                         group="Manuel",
-                        json={"CVR": data["CVR"], "Årsag": "Intet p-nummer i Nexus"},
+                        json={
+                            "Leverandør": data["navn"],
+                            "CVR": data["CVR"],
+                            "Årsag": "Intet p-nummer i Nexus",
+                        },
                     )
                     tracker.track_partial_task(process_name=proces_navn)
                     continue
@@ -92,6 +96,7 @@ async def process_workqueue(workqueue: Workqueue):
                         report_id="inaktivering_af_cvr_leverandoerer_i_nexus",
                         group="Manuel",
                         json={
+                            "Leverandør": data["navn"],
                             "CVR": data["CVR"],
                             "Årsag": f"Virksomhed ikke fundet i CVR: {data['CVR']}",
                         },
@@ -117,6 +122,7 @@ async def process_workqueue(workqueue: Workqueue):
                             report_id="inaktivering_af_cvr_leverandoerer_i_nexus",
                             group="Manuel",
                             json={
+                                "Leverandør": data["navn"],
                                 "CVR": data["CVR"],
                                 "P-nummer": p_number,
                                 "Årsag": f"Angivne P-nummer kunne ikke bekræftes: {p_number}",
@@ -134,6 +140,7 @@ async def process_workqueue(workqueue: Workqueue):
                                 report_id="inaktivering_af_cvr_leverandoerer_i_nexus",
                                 group="Manuel",
                                 json={
+                                    "Leverandør": data["navn"],
                                     "CVR": data["CVR"],
                                     "P-nummer": p_number,
                                     "Årsag": f"Leverandørnavn i Nexus og navn fra datafordeleren stemmer ikke overens: {data['navn']} vs {p_unit_name}",
