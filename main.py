@@ -45,7 +45,7 @@ async def populate_queue(workqueue: Workqueue):
     aktive_leverandører = [
         leverandør
         for leverandør in alle_leverandører
-        if leverandør.get("cvrNumber") and leverandør.get("active")
+        if leverandør.get("cvrNumber") and leverandør.get("active") and leverandør["type"] == "external"
     ]
     for leverandør in aktive_leverandører:
         self = nexus.nexus_client.get(leverandør["_links"]["self"]["href"]).json()
